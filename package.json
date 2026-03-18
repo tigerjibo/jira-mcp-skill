@@ -15,7 +15,7 @@
     "task-tracking",
     "bug-tracking"
   ],
-  "author": "",
+  "author": "tigerjibo",
   "license": "MIT",
   "dependencies": {
     "axios": "^1.6.0"
@@ -28,10 +28,10 @@
   },
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "https://github.com/tigerjibo/jira-mcp-skill.git"
   },
   "bugs": {
-    "url": ""
+    "url": "https://github.com/tigerjibo/jira-mcp-skill/issues"
   },
-  "homepage": ""
+  "homepage": "https://github.com/tigerjibo/jira-mcp-skill#readme"
 }
