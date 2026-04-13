@@ -30,6 +30,8 @@ JIRA MCP Skill 是一个轻量级的 JIRA 项目管理工具包，专为 Trae AI
 | 📋 **看板管理** | 获取看板问题列表、项目看板查询 |
 | ⚡ **零依赖部署** | 无需启动服务器，直接调用 JIRA REST API |
 | 🔐 **安全认证** | 支持 Cookie、Bearer Token、API Token 三种认证方式 |
+| 🛡️ **Cookie 验证** | 自动检测 Cookie 有效性，识别登出状态和缺失字段 |
+| 🔄 **自动配置** | 自动搜索加载 .env 文件，无需手动配置路径 |
 
 ### 🚀 快速开始
 
@@ -55,7 +57,8 @@ git clone https://github.com/tigerjibo/jira-mcp-skill.git
 JIRA_BASE_URL=https://your-jira-url/jira
 
 # 认证方式 1: Cookies（推荐用于 SSO 环境）
-JIRA_COOKIES=JSESSIONID=xxx; atlassian.xsrf.token=xxx;
+# 必需字段: JSESSIONID, atlassian.xsrf.token (以 _lin 结尾), seraph.rememberme.cookie
+JIRA_COOKIES=JSESSIONID=xxx; atlassian.xsrf.token=xxx_lin; seraph.rememberme.cookie=xxx
 
 # 认证方式 2: Bearer Token
 # JIRA_AUTH_TOKEN=Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
@@ -68,11 +71,17 @@ JIRA_COOKIES=JSESSIONID=xxx; atlassian.xsrf.token=xxx;
 #### 获取认证信息
 
 **Cookies 方式（推荐）**：
-1. 登录 JIRA
+1. 登录 JIRA（**勾选"记住我"**）
 2. 按 `F12` 打开开发者工具
-3. 切换到 `Network` 标签
-4. 刷新页面，点击任意 `/rest/api/` 请求
-5. 复制 Request Headers 中的 `Cookie` 值
+3. 切换到 `Application` → `Cookies` → 选择 JIRA 域名
+4. 复制以下 Cookie 字段（`key=value` 格式，用 `;` 分隔）：
+
+| Cookie 名称 | 必需 | 说明 |
+|-------------|------|------|
+| `JSESSIONID` | ✅ | 会话 ID |
+| `atlassian.xsrf.token` | ✅ | 必须以 `_lin` 结尾（`_lout` 表示已登出） |
+| `seraph.rememberme.cookie` | ✅ | 仅在勾选"记住我"后存在 |
+| `ngx_jira` | 推荐 | 负载均衡路由 |
 
 **Bearer Token 方式**：
 1. 登录 JIRA
@@ -85,6 +94,14 @@ JIRA_COOKIES=JSESSIONID=xxx; atlassian.xsrf.token=xxx;
 
 ```javascript
 const jira = require('jira-mcp-skill');
+
+// 验证认证状态
+const auth = await jira.checkAuth();
+console.log(auth.valid ? `已登录: ${auth.user}` : `认证失败: ${auth.error}`);
+
+// 验证 Cookie 格式
+const cookieStatus = jira.validateCookieFormat(process.env.JIRA_COOKIES);
+if (!cookieStatus.valid) console.log('Cookie 问题:', cookieStatus.issues);
 
 // JQL 搜索问题
 const issues = await jira.searchIssues('project = ISID AND status != DONE');

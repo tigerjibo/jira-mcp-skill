@@ -1,16 +1,136 @@
 const axios = require('axios');
+const path = require('path');
+const fs = require('fs');
 
 let _client = null;
+let _envLoaded = false;
+
+function loadEnv() {
+  if (_envLoaded) return;
+  _envLoaded = true;
+
+  const dotenv = tryRequire('dotenv');
+  if (!dotenv) return;
+
+  const envPaths = [
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(__dirname, '../../../.env'),
+    path.resolve(__dirname, '../../.env'),
+    path.resolve(__dirname, '../.env'),
+    path.resolve(__dirname, '.env'),
+  ];
+
+  for (const envPath of envPaths) {
+    if (fs.existsSync(envPath)) {
+      dotenv.config({ path: envPath });
+      return;
+    }
+  }
+}
+
+function tryRequire(moduleName) {
+  try {
+    return require(moduleName);
+  } catch {
+    return null;
+  }
+}
+
+function validateCookieFormat(cookies) {
+  if (!cookies) return { valid: false, reason: 'Cookie 为空', issues: ['Cookie 为空'] };
+
+  const issues = [];
+
+  if (!cookies.includes('JSESSIONID')) {
+    issues.push('缺少 JSESSIONID');
+  }
+
+  if (cookies.includes('atlassian.xsrf.token')) {
+    const match = cookies.match(/atlassian\.xsrf\.token=[^;]+/);
+    if (match) {
+      const token = match[0];
+      if (token.endsWith('_lout')) {
+        issues.push('atlassian.xsrf.token 以 _lout 结尾（已登出状态），需要以 _lin 结尾（已登录状态）');
+      }
+    }
+  } else {
+    issues.push('缺少 atlassian.xsrf.token');
+  }
+
+  if (!cookies.includes('seraph.rememberme.cookie')) {
+    issues.push('缺少 seraph.rememberme.cookie（需在浏览器登录时勾选"记住我"）');
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues
+  };
+}
+
+function getAuthStatus() {
+  loadEnv();
+  const cookies = process.env.JIRA_COOKIES || '';
+  const token = process.env.JIRA_AUTH_TOKEN || '';
+  const baseUrl = process.env.JIRA_BASE_URL || '';
+
+  return {
+    configured: !!(baseUrl && (cookies || token)),
+    authMethod: token ? 'Bearer Token' : cookies ? 'Cookies' : 'None',
+    baseUrl,
+    cookieValidation: cookies ? validateCookieFormat(cookies) : null
+  };
+}
+
+async function checkAuth() {
+  loadEnv();
+  try {
+    const client = getClient();
+    const resp = await client.get('/rest/api/2/myself');
+    return {
+      valid: true,
+      user: resp.data.displayName,
+      username: resp.data.name,
+      error: null
+    };
+  } catch (err) {
+    const status = err.response?.status;
+    let errorMsg = err.message;
+    let hint = '';
+
+    if (status === 401) {
+      errorMsg = '认证失败 (401)';
+      const cookieVal = validateCookieFormat(process.env.JIRA_COOKIES || '');
+      if (!cookieVal.valid) {
+        hint = 'Cookie 问题: ' + cookieVal.issues.join('; ');
+      } else {
+        hint = 'Cookie 可能已过期，请重新获取。确保 atlassian.xsrf.token 以 _lin 结尾，且包含 seraph.rememberme.cookie';
+      }
+    } else if (status === 302) {
+      errorMsg = '被重定向 (302)，可能是 SSO 登录页';
+      hint = 'Cookie 不完整或已失效，请重新从浏览器获取完整 Cookie';
+    }
+
+    return {
+      valid: false,
+      user: null,
+      username: null,
+      error: errorMsg,
+      hint
+    };
+  }
+}
 
 function getClient() {
   if (_client) return _client;
-  
+
+  loadEnv();
+
   const JIRA_BASE_URL = process.env.JIRA_BASE_URL;
   const JIRA_COOKIES = process.env.JIRA_COOKIES || '';
   const JIRA_AUTH_TOKEN = process.env.JIRA_AUTH_TOKEN || '';
 
   if (!JIRA_BASE_URL) {
-    throw new Error('JIRA_BASE_URL environment variable is required');
+    throw new Error('JIRA_BASE_URL environment variable is required. Create .env file with JIRA_BASE_URL=https://your-jira-url/jira');
   }
 
   const headers = {
@@ -23,7 +143,10 @@ function getClient() {
   } else if (JIRA_COOKIES) {
     headers['Cookie'] = JIRA_COOKIES;
   } else {
-    throw new Error('Either JIRA_COOKIES or JIRA_AUTH_TOKEN is required');
+    throw new Error(
+      'Authentication required. Set JIRA_COOKIES or JIRA_AUTH_TOKEN in .env file.\n' +
+      'For Cookie auth: JIRA_COOKIES=JSESSIONID=xxx; atlassian.xsrf.token=xxx_lin; seraph.rememberme.cookie=xxx'
+    );
   }
 
   _client = axios.create({
@@ -31,7 +154,7 @@ function getClient() {
     headers,
     maxRedirects: 0
   });
-  
+
   return _client;
 }
 
@@ -39,7 +162,22 @@ function resetClient() {
   _client = null;
 }
 
+async function ensureAuthenticated() {
+  const status = getAuthStatus();
+  if (!status.configured) {
+    throw new Error(
+      'JIRA 认证未配置。请在 .env 文件中设置:\n' +
+      '  JIRA_BASE_URL=https://your-jira-url/jira\n' +
+      '  JIRA_COOKIES=JSESSIONID=xxx; atlassian.xsrf.token=xxx_lin; seraph.rememberme.cookie=xxx'
+    );
+  }
+  if (status.cookieValidation && !status.cookieValidation.valid) {
+    console.warn('[jira-mcp] Cookie 验证警告:', status.cookieValidation.issues.join('; '));
+  }
+}
+
 async function searchIssues(jql, fields = 'key,summary,status,assignee,priority', maxResults = 50) {
+  await ensureAuthenticated();
   const resp = await getClient().get('/rest/api/2/search', {
     params: { jql, fields, maxResults }
   });
@@ -47,11 +185,13 @@ async function searchIssues(jql, fields = 'key,summary,status,assignee,priority'
 }
 
 async function getIssue(issueKey) {
+  await ensureAuthenticated();
   const resp = await getClient().get(`/rest/api/2/issue/${issueKey}`);
   return resp.data;
 }
 
 async function getBoardIssues(boardId, maxResults = 200) {
+  await ensureAuthenticated();
   const resp = await getClient().get(`/rest/agile/1.0/board/${boardId}/issue`, {
     params: { maxResults }
   });
@@ -59,6 +199,7 @@ async function getBoardIssues(boardId, maxResults = 200) {
 }
 
 async function getProjectBoards(projectKey) {
+  await ensureAuthenticated();
   const resp = await getClient().get('/rest/agile/1.0/board', {
     params: { projectKeyOrId: projectKey }
   });
@@ -66,11 +207,13 @@ async function getProjectBoards(projectKey) {
 }
 
 async function getProjects() {
+  await ensureAuthenticated();
   const resp = await getClient().get('/rest/api/2/project');
   return resp.data || [];
 }
 
 async function createIssue(issueData) {
+  await ensureAuthenticated();
   const resp = await getClient().post('/rest/api/2/issue', issueData);
   return resp.data;
 }
@@ -94,10 +237,10 @@ function extractProjectKey(issueKey) {
 async function getTaskProgress(taskKeys) {
   const jql = `key IN (${taskKeys.join(',')})`;
   const issues = await searchIssues(jql, 'key,summary,status,assignee');
-  
+
   const doneStatus = ['DONE', '已完成', 'Resolved', 'Closed'];
   const completed = issues.filter(i => doneStatus.includes(i.fields.status?.name));
-  
+
   return {
     total: issues.length,
     completed: completed.length,
@@ -113,20 +256,20 @@ async function getTaskProgress(taskKeys) {
 
 async function getBugStatus(boardId) {
   const issues = await getBoardIssues(boardId);
-  
+
   const statusCount = {};
   issues.forEach(i => {
     const s = i.fields.status?.name || 'Unknown';
     statusCount[s] = (statusCount[s] || 0) + 1;
   });
-  
+
   const doneStatus = ['RESOLVED', 'VERIFIED', 'Closed'];
   const completed = issues.filter(i => doneStatus.includes(i.fields.status?.name));
   const openBugs = issues.filter(i => !doneStatus.includes(i.fields.status?.name));
-  const highPriority = openBugs.filter(i => 
+  const highPriority = openBugs.filter(i =>
     ['Highest', 'High', 'Critical', 'Blocker'].includes(i.fields.priority?.name)
   );
-  
+
   return {
     total: issues.length,
     completed: completed.length,
@@ -150,10 +293,10 @@ async function getBugStatus(boardId) {
 async function getOpenTasksByAssignee(taskKeys) {
   const jql = `key IN (${taskKeys.join(',')})`;
   const issues = await searchIssues(jql, 'key,summary,status,assignee');
-  
+
   const doneStatus = ['DONE', '已完成', 'Resolved', 'Closed'];
   const openTasks = issues.filter(i => !doneStatus.includes(i.fields.status?.name));
-  
+
   const byAssignee = {};
   openTasks.forEach(i => {
     const name = i.fields.assignee?.displayName || 'Unassigned';
@@ -164,7 +307,7 @@ async function getOpenTasksByAssignee(taskKeys) {
       status: i.fields.status?.name
     });
   });
-  
+
   return {
     total: issues.length,
     openCount: openTasks.length,
@@ -175,6 +318,11 @@ async function getOpenTasksByAssignee(taskKeys) {
 module.exports = {
   getClient,
   resetClient,
+  loadEnv,
+  validateCookieFormat,
+  getAuthStatus,
+  checkAuth,
+  ensureAuthenticated,
   searchIssues,
   getIssue,
   getBoardIssues,

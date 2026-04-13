@@ -30,6 +30,58 @@ env_vars:
 
 ## API 参考
 
+### 认证函数
+
+#### checkAuth()
+
+验证当前认证状态，调用 JIRA `/rest/api/2/myself` 接口。
+
+```yaml
+params: none
+returns:
+  valid: boolean
+  user: string | null  # displayName
+  username: string | null  # account name
+  error: string | null
+  hint: string  # Troubleshooting hint when auth fails
+```
+
+#### getAuthStatus()
+
+获取当前认证配置状态（不发起 API 请求）。
+
+```yaml
+params: none
+returns:
+  configured: boolean
+  authMethod: "Cookies" | "Bearer Token" | "None"
+  baseUrl: string
+  cookieValidation: { valid: boolean, issues: string[] } | null
+```
+
+#### validateCookieFormat(cookies)
+
+验证 Cookie 字符串格式和完整性。
+
+```yaml
+params:
+  cookies:
+    type: string
+    required: true
+returns:
+  valid: boolean
+  issues: string[]  # e.g., ["缺少 JSESSIONID", "atlassian.xsrf.token 以 _lout 结尾"]
+```
+
+#### ensureAuthenticated()
+
+在 API 调用前预检查认证配置，Cookie 问题时输出警告。
+
+```yaml
+params: none
+returns: void (throws Error if not configured)
+```
+
 ### 核心函数
 
 #### searchIssues(jql, fields, maxResults)
@@ -256,16 +308,30 @@ high_priority:
 errors:
   - code: 401
     cause: "Authentication failed / Cookie expired"
-    solution: "Refresh authentication credentials"
+    solution: "Run checkAuth() to diagnose, refresh credentials if needed"
+    hint: "Check atlassian.xsrf.token ends with _lin (not _lout)"
   - code: 302
     cause: "SSO redirect"
-    solution: "Check cookie format and completeness"
+    solution: "Cookie incomplete or expired, re-login with Remember Me"
   - code: 404
     cause: "Resource not found"
     solution: "Verify issue key or board ID exists"
   - code: 400
     cause: "Invalid request parameters"
     solution: "Check JQL syntax or field values"
+  - code: 400_JQL
+    cause: "JQL query error"
+    solution: "Verify JQL syntax, check project key exists and user has access"
+cookie_issues:
+  - symptom: "atlassian.xsrf.token ends with _lout"
+    cause: "User logged out"
+    solution: "Re-login in browser, ensure token ends with _lin"
+  - symptom: "Missing seraph.rememberme.cookie"
+    cause: "Did not check Remember Me during login"
+    solution: "Re-login with Remember Me checked"
+  - symptom: "dotenv path error"
+    cause: ".env file not found"
+    solution: "Skill auto-searches cwd, ../../, ../, ./ paths"
 ```
 
 ## 使用示例

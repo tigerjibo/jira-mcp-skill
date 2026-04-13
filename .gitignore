@@ -4,16 +4,26 @@ node_modules/
 # Environment files
 .env
 .env.local
+.env.*.local
+
+# Build output
+dist/
+build/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+*.sublime-*
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Test scripts
+test-*.js
+!test.js
 
 # Logs
 *.log
