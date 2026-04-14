@@ -154,6 +154,32 @@ params: none
 returns: Array<Project>
 ```
 
+#### getProjectVersions(projectKey)
+
+获取项目的所有版本。
+
+```yaml
+params:
+  projectKey:
+    type: string
+    required: true
+    example: "IMPROVE1"
+returns: Array<Version>
+```
+
+#### getCustomFieldOptions(fieldId)
+
+获取自定义字段的选项。
+
+```yaml
+params:
+  fieldId:
+    type: string
+    required: true
+    example: "23626"
+returns: Array<CustomFieldOption>
+```
+
 #### createIssue(issueData)
 
 创建新问题/任务。
@@ -180,6 +206,36 @@ params:
           name: string  # Username
       customfield_*:
         type: any  # Custom fields
+returns: { id: string, key: string, self: string }
+```
+
+#### createImproveTask(summary, options)
+
+创建 IMPROVE1 项目任务，自动处理必填字段。
+
+```yaml
+params:
+  summary:
+    type: string
+    required: true
+    example: "【结项门禁核查】PVM-RSAS-V6.0R04F04SP11"
+  options:
+    type: object
+    properties:
+      assignee:
+        type: string
+        default: "jibo"
+        example: "jibo"
+      reporter:
+        type: string
+        default: "wangqiang4"
+        example: "wangqiang4"
+      projectType:
+        type: string
+        default: "公共支持"
+      fixVersion:
+        type: string
+        default: "2026年年度过程改进"
 returns: { id: string, key: string, self: string }
 ```
 
@@ -410,6 +466,32 @@ async function example4() {
 }
 ```
 
+### 示例 5: 创建 IMPROVE1 结项门禁核查任务
+
+```javascript
+const jira = require('jira-mcp-skill');
+
+async function example5() {
+  try {
+    const result = await jira.createImproveTask('【结项门禁核查】PVM-RSAS-V6.0R04F04SP11', {
+      assignee: 'jibo', // 经办人：冀博
+      reporter: 'wangqiang4', // 报告人：王强
+      projectType: '公共支持',
+      fixVersion: '2026年年度过程改进'
+    });
+    
+    console.log('任务创建成功!');
+    console.log('任务ID:', result.key);
+    console.log('任务链接:', process.env.JIRA_BASE_URL + '/browse/' + result.key);
+    
+    return result.key;
+  } catch (error) {
+    console.error('创建任务失败:', error.message);
+    throw error;
+  }
+}
+```
+
 ## AI Agent 集成指南
 
 ### 安装 Skill
@@ -456,6 +538,10 @@ user_intents:
   - pattern: "创建.*子任务"
     action: createSubtask
     params: { parentKey, summary }
+  
+  - pattern: "创建.*结项门禁核查.*任务"
+    action: createImproveTask
+    params: { summary, assignee, reporter, projectType, fixVersion }
 ```
 
 ## 安全注意事项

@@ -212,10 +212,82 @@ async function getProjects() {
   return resp.data || [];
 }
 
+async function getProjectVersions(projectKey) {
+  await ensureAuthenticated();
+  const resp = await getClient().get(`/rest/api/2/project/${projectKey}/versions`);
+  return resp.data || [];
+}
+
+async function getCustomFieldOptions(fieldId) {
+  await ensureAuthenticated();
+  const resp = await getClient().get(`/rest/api/2/customFieldOption/${fieldId}/children`);
+  return resp.data || [];
+}
+
+async function createImproveTask(summary, options = {}) {
+  await ensureAuthenticated();
+  
+  const { 
+    assignee = 'jibo', // 默认冀博
+    reporter = 'wangqiang4', // 默认王强
+    projectType = '公共支持',
+    fixVersion = '2026年年度过程改进'
+  } = options;
+  
+  try {
+    // 获取项目版本
+    const versions = await getProjectVersions('IMPROVE1');
+    const targetVersion = versions.find(v => v.name === fixVersion);
+    if (!targetVersion) {
+      throw new Error(`未找到版本: ${fixVersion}`);
+    }
+    
+    // 项目类型字段 ID (从之前的查询中获取)
+    const projectTypeFieldId = '23626'; // 公共支持的 ID
+    
+    const issueData = {
+      fields: {
+        project: { key: 'IMPROVE1' },
+        summary,
+        issuetype: { name: '任务' },
+        assignee: { name: assignee },
+        reporter: { name: reporter },
+        customfield_11443: { id: projectTypeFieldId }, // 项目类型
+        fixVersions: [{ id: targetVersion.id }] // 修复版本
+      }
+    };
+    
+    return await createIssue(issueData);
+  } catch (error) {
+    throw new Error(`创建 IMPROVE1 任务失败: ${error.message}`);
+  }
+}
+
 async function createIssue(issueData) {
   await ensureAuthenticated();
-  const resp = await getClient().post('/rest/api/2/issue', issueData);
-  return resp.data;
+  try {
+    const resp = await getClient().post('/rest/api/2/issue', issueData);
+    return resp.data;
+  } catch (error) {
+    if (error.response) {
+      const status = error.response.status;
+      const data = error.response.data;
+      
+      if (status === 400) {
+        let errorMessage = '创建任务失败 (400)';
+        if (data.errors) {
+          const errorDetails = Object.entries(data.errors)
+            .map(([field, message]) => `${field}: ${message}`)
+            .join('; ');
+          errorMessage += `: ${errorDetails}`;
+        }
+        throw new Error(errorMessage);
+      } else if (status === 500) {
+        throw new Error('创建任务失败 (500): 内部服务器错误，请检查字段格式是否正确');
+      }
+    }
+    throw error;
+  }
 }
 
 async function createSubtask(parentKey, summary, options = {}) {
@@ -328,7 +400,10 @@ module.exports = {
   getBoardIssues,
   getProjectBoards,
   getProjects,
+  getProjectVersions,
+  getCustomFieldOptions,
   createIssue,
+  createImproveTask,
   createSubtask,
   getTaskProgress,
   getBugStatus,

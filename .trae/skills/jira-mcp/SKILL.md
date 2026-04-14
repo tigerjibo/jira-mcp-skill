@@ -70,7 +70,10 @@ The skill automatically validates cookie format before API calls:
 | `getBoardIssues(boardId, maxResults)` | Get all issues on a board |
 | `getProjectBoards(projectKey)` | Get boards for a project |
 | `getProjects()` | List all projects |
+| `getProjectVersions(projectKey)` | Get versions for a project |
+| `getCustomFieldOptions(fieldId)` | Get options for a custom field |
 | `createIssue(issueData)` | Create new issue |
+| `createImproveTask(summary, options)` | Create IMPROVE1 project task with required fields |
 | `createSubtask(parentKey, summary, options)` | Create subtask |
 
 ### Convenience Functions
@@ -124,6 +127,18 @@ await jira.createIssue({
   issuetype: { name: 'Task' },
   assignee: { name: 'username' }
 });
+```
+
+### Create IMPROVE1 Task (结项门禁核查)
+
+```javascript
+const result = await jira.createImproveTask('【结项门禁核查】PVM-RSAS-V6.0R04F04SP11', {
+  assignee: 'jibo', // 经办人
+  reporter: 'wangqiang4', // 报告人
+  projectType: '公共支持',
+  fixVersion: '2026年年度过程改进'
+});
+console.log('Task created:', result.key);
 ```
 
 ## Custom Fields Reference
