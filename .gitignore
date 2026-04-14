@@ -16,6 +16,7 @@ build/
 *.swp
 *.swo
 *.sublime-*
+.claude/
 
 # OS
 .DS_Store
